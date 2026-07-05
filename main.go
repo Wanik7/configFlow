@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -85,6 +86,11 @@ func main() {
 
 	case "backup":
 		const backupDir = "./backups"
+		if err := os.MkdirAll(backupDir, 0755); err != nil {
+			fmt.Println("Error creating backup directory:", err)
+			return
+		}
+
 		// Parse flags that come after the backup word
 		backupCmd.Parse(os.Args[2:])
 
@@ -108,7 +114,21 @@ func main() {
 		engine.RegisterStorage(&ArchiveStorage{backupDir: backupDir})
 
 		var key [32]byte
-		copy(key[:], *keyStr)
+		if *keyStr != "" {
+			// Decoding HEX-string into bytes
+			decodedKey, err := hex.DecodeString(*keyStr)
+			if err != nil {
+				fmt.Println("Error: invalid hex key provided")
+				return
+			}
+			// Check for correct length
+			if len(decodedKey) != 32 {
+				fmt.Println("Error: key must be exactly 32 bytes (64 hex characters)")
+				return
+			}
+			// Copy correct bytes into our array
+			copy(key[:], decodedKey)
+		}
 
 		engine.RegisterStorage(&SecureStorage{backupDir: backupDir, secretKey: key})
 
