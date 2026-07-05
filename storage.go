@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"crypto/aes"
 	"crypto/cipher"
@@ -27,16 +28,22 @@ func (as *ArchiveStorage) Store(cfgName string, data io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("could not create backup file: %w", err)
 	}
-
-	defer CloseSafe(backUpFile)
+	defer backUpFile.Close()
 
 	gzipWriter := gzip.NewWriter(backUpFile)
-
-	defer CloseSafe(gzipWriter)
+	defer gzipWriter.Close()
 
 	_, err = io.Copy(gzipWriter, data)
 	if err != nil {
 		return fmt.Errorf("could not copy data: %w", err)
+	}
+
+	if err := gzipWriter.Close(); err != nil {
+		return fmt.Errorf("could not close gzip writer: %w", err)
+	}
+
+	if err := backUpFile.Close(); err != nil {
+		return fmt.Errorf("could not close backup file: %w", err)
 	}
 
 	return nil
@@ -58,8 +65,7 @@ func (ss *SecureStorage) Store(cfgName string, data io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("could not create backup file: %w", err)
 	}
-
-	defer CloseSafe(backUpFile)
+	defer backUpFile.Close()
 
 	block, err := aes.NewCipher(ss.secretKey[:])
 	if err != nil {
@@ -76,13 +82,21 @@ func (ss *SecureStorage) Store(cfgName string, data io.Reader) error {
 		return fmt.Errorf("unexpected error with crypto-key handle: %w", err)
 	}
 
+	bufferedWriter := bufio.NewWriter(backUpFile)
 	stream := cipher.NewCTR(block, iv)
-
-	writer := cipher.StreamWriter{S: stream, W: backUpFile}
+	writer := cipher.StreamWriter{S: stream, W: bufferedWriter}
 
 	_, err = io.Copy(writer, data)
 	if err != nil {
 		return fmt.Errorf("could not handle crypto-stream: %w", err)
+	}
+
+	if err := bufferedWriter.Flush(); err != nil {
+		return fmt.Errorf("could not flush buffered writer: %w", err)
+	}
+
+	if err := backUpFile.Close(); err != nil {
+		return fmt.Errorf("could not close backup file: %w", err)
 	}
 
 	return nil

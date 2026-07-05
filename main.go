@@ -5,11 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
-func ComandHelpMessage(f *flag.FlagSet) func() {
+func CommandHelpMessage(f *flag.FlagSet) func() {
 	return func() {
-		fmt.Printf("Usage: configflow %s [flags]\n", f.Name())
+		fmt.Printf("Usage: %s %s [flags]\n", filepath.Base(os.Args[0]), f.Name())
 		fmt.Println("\nFlags:")
 		f.PrintDefaults()
 	}
@@ -21,8 +22,8 @@ func main() {
 	toTerminal := keygenCmd.Bool("t", false, "Print key into terminal")
 	keyDest := keygenCmd.String("out", "", "Point to key file")
 
-	// custom help massage for keygen
-	keygenCmd.Usage = ComandHelpMessage(keygenCmd)
+	// custom help message for keygen
+	keygenCmd.Usage = CommandHelpMessage(keygenCmd)
 
 	// backup command && its flags
 	backupCmd := flag.NewFlagSet("backup", flag.ExitOnError)
@@ -30,15 +31,16 @@ func main() {
 	outName := backupCmd.String("out", "", "Point to destination file (REQUIRED)")
 	keyStr := backupCmd.String("key", "", "Use provided 32-byte hex key for encryption (enables secure mode)")
 
-	// custom help massage for backup
-	backupCmd.Usage = ComandHelpMessage(backupCmd)
+	// custom help message for backup
+	backupCmd.Usage = CommandHelpMessage(backupCmd)
 
-	// standart help massage
+	// standard help message
 	flag.Usage = func() {
-		fmt.Println("configFlow CLI — Utility that stores your config backups")
-		fmt.Println("\nUsage:\n  configflow [command] [flags]")
+		binName := filepath.Base(os.Args[0])
+		fmt.Printf("%s CLI — Utility that stores your config backups\n", binName)
+		fmt.Printf("\nUsage:\n  %s [command] [flags]\n", binName)
 		fmt.Println("\nCommands:\n  keygen       Generate a new 256-bit encryption key\n  backup       Backup an existing config file")
-		fmt.Println("\nUse \"configflow [command] -h\" for more information about a command.")
+		fmt.Printf("\nUse \"%s [command] -h\" for more information about a command.\n", binName)
 	}
 
 	// If user didn't enter any command
