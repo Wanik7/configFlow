@@ -1,30 +1,123 @@
 package main
 
 import (
+	"flag"
 	"fmt"
-	"io"
-	"log"
+	"os"
 )
 
-// Custom function using Closer interface that do a simple error handling after Close method
-
-func CloseSafe(c io.Closer) {
-	if err := c.Close(); err != nil {
-		log.Printf("could not close resource: %v", err)
+func ComandHelpMessage(f *flag.FlagSet) func() {
+	return func() {
+		fmt.Printf("Usage: configflow %s [flags]\n", f.Name())
+		fmt.Println("\nFlags:")
+		f.PrintDefaults()
 	}
 }
 
-// TIP <p>To run your code, right-click the code and select <b>Run</b>.</p> <p>Alternatively, click
-// the <icon src="AllIcons.Actions.Execute"/> icon in the gutter and select the <b>Run</b> menu item from here.</p>
 func main() {
-	//TIP <p>Press <shortcut actionId="ShowIntentionActions"/> when your caret is at the underlined text
-	// to see how GoLand suggests fixing the warning.</p><p>Alternatively, if available, click the lightbulb to view possible fixes.</p>
-	s := "gopher"
-	fmt.Println("Hello and welcome, %s!", s)
+	// keygen command && its flags
+	keygenCmd := flag.NewFlagSet("keygen", flag.ExitOnError)
+	toTerminal := keygenCmd.Bool("t", false, "Print key into terminal")
+	keyDest := keygenCmd.String("out", "", "Point to key file")
 
-	for i := 1; i <= 5; i++ {
-		//TIP <p>To start your debugging session, right-click your code in the editor and select the Debug option.</p> <p>We have set one <icon src="AllIcons.Debugger.Db_set_breakpoint"/> breakpoint
-		// for you, but you can always add more by pressing <shortcut actionId="ToggleLineBreakpoint"/>.</p>
-		fmt.Println("i =", 100/i)
+	// custom help massage for keygen
+	keygenCmd.Usage = ComandHelpMessage(keygenCmd)
+
+	// backup command && its flags
+	backupCmd := flag.NewFlagSet("backup", flag.ExitOnError)
+	inFile := backupCmd.String("in", "", "Point to target file (REQUIRED)")
+	outName := backupCmd.String("out", "", "Point to destination file (REQUIRED)")
+	keyStr := backupCmd.String("key", "", "Use provided 32-byte hex key for encryption (enables secure mode)")
+
+	// custom help massage for backup
+	backupCmd.Usage = ComandHelpMessage(backupCmd)
+
+	// standart help massage
+	flag.Usage = func() {
+		fmt.Println("configFlow CLI — Utility that stores your config backups")
+		fmt.Println("\nUsage:\n  configflow [command] [flags]")
+		fmt.Println("\nCommands:\n  keygen       Generate a new 256-bit encryption key\n  backup       Backup an existing config file")
+		fmt.Println("\nUse \"configflow [command] -h\" for more information about a command.")
+	}
+
+	// If user didn't enter any command
+	if len(os.Args) < 2 {
+		flag.Usage()
+		return
+	}
+
+	// Check which command the user entered first
+	switch os.Args[1] {
+	case "keygen":
+		// Parse flags that come after the keygen word
+		keygenCmd.Parse(os.Args[2:])
+
+		// KEYGEN LOGIC
+		if *toTerminal {
+			// Generate 32 random bytes
+			key, err := GenerateKey()
+			if err != nil {
+				fmt.Println("Error generating key:", err)
+				return
+			}
+			// Print key in terminal in beautiful HEX format (%x)
+			fmt.Printf("Your Master Key (Save it securely!):\n%x\n", key)
+		} else {
+			if *keyDest == "" {
+				fmt.Println("Error: -out flag is required.")
+				keygenCmd.Usage()
+				return
+			}
+			// Create new 32 byte key
+			key, err := GenerateKey()
+			if err != nil {
+				fmt.Println("Error generating key:", err)
+				return
+			}
+			// Write key to file
+			err = os.WriteFile(*keyDest, key, 0600)
+			if err != nil {
+				fmt.Println("Error writing key file:", err)
+				return
+			}
+			fmt.Printf("Key written to: %s\n", *keyDest)
+		}
+
+	case "backup":
+		const backupDir = "./backups"
+		// Parse flags that come after the backup word
+		backupCmd.Parse(os.Args[2:])
+
+		// Checking required flags
+		if *inFile == "" || *outName == "" {
+			fmt.Println("Error: -in and -out flags are required.")
+			backupCmd.Usage()
+			return
+		}
+
+		// Determine backup strategy
+		storageType := "archive"
+		if *keyStr != "" {
+			storageType = "secure"
+		}
+
+		fmt.Printf("Starting backup for: %s -> saved as: %s using [%s] storage\n", *inFile, *outName, storageType)
+
+		engine := NewSyncEngine()
+
+		engine.RegisterStorage(&ArchiveStorage{backupDir: backupDir})
+
+		var key [32]byte
+		copy(key[:], *keyStr)
+
+		engine.RegisterStorage(&SecureStorage{backupDir: backupDir, secretKey: key})
+
+		if err := engine.Backup(*inFile, *outName, storageType); err != nil {
+			fmt.Println("Error during backup:", err)
+		}
+
+	default:
+		fmt.Printf("Unknown command: %s\n", os.Args[1])
+		flag.Usage()
 	}
 }

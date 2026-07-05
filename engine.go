@@ -20,7 +20,7 @@ func (se *SyncEngine) RegisterStorage(s Storage) {
 func (se *SyncEngine) Backup(sourceFile, configName, storageName string) error {
 	storage, ok := se.storages[storageName]
 	if !ok {
-		return fmt.Errorf("no such storage: %w", storageName)
+		return fmt.Errorf("no such storage: %s", storageName)
 	}
 
 	targetFile, err := os.Open(sourceFile)
