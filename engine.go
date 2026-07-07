@@ -40,6 +40,25 @@ func (se *SyncEngine) Backup(sourceFile, configName, storageName string) error {
 	return nil
 }
 
+func (se *SyncEngine) Restore(backupFile, destFile, storageName string) error {
+	storage, ok := se.storages[storageName]
+	if !ok {
+		return fmt.Errorf("no such storage: %s", storageName)
+	}
+
+	outFile, err := os.Create(destFile)
+	if err != nil {
+		return fmt.Errorf("could not create destination file: %w", err)
+	}
+	defer CloseSafe(outFile)
+
+	if err := storage.Retrieve(backupFile, outFile); err != nil {
+		return fmt.Errorf("could not restore backup: %w", err)
+	}
+
+	return nil
+}
+
 func CloseSafe(c io.Closer) {
 	if err := c.Close(); err != nil {
 		log.Printf("could not close resource: %v", err)

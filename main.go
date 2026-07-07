@@ -10,27 +10,12 @@ import (
 func CommandHelpMessage(f *flag.FlagSet) func() {
 	return func() {
 		fmt.Printf("Usage: %s %s [flags]\n", filepath.Base(os.Args[0]), f.Name())
-		fmt.Println("\nFlags:")
+		fmt.Println("Flags:")
 		f.PrintDefaults()
 	}
 }
 
-func CreateDestDir(backupDir string, permissions os.FileMode) error {
-	if err := os.MkdirAll(backupDir, permissions); err != nil {
-		return fmt.Errorf("could not create backup directory: %w", err)
-	}
-	return nil
-}
-
 func main() {
-	// keygen command && its flags
-	keygenCmd := flag.NewFlagSet("keygen", flag.ExitOnError)
-	toTerminal := keygenCmd.Bool("t", false, "Print key into terminal")
-	keyDest := keygenCmd.String("out", "", "Point to key file")
-
-	// custom help message for keygen
-	keygenCmd.Usage = CommandHelpMessage(keygenCmd)
-
 	// backup command && its flags
 	backupCmd := flag.NewFlagSet("backup", flag.ExitOnError)
 	inFile := backupCmd.String("in", "", "Point to target file (REQUIRED)")
@@ -40,12 +25,21 @@ func main() {
 	// custom help message for backup
 	backupCmd.Usage = CommandHelpMessage(backupCmd)
 
+	// restore command && its flags
+	restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
+	restoreIn := restoreCmd.String("in", "", "Path to the backup file (REQUIRED)")
+	restoreOut := restoreCmd.String("out", "", "Path to restore the file to (REQUIRED)")
+	restoreKey := restoreCmd.String("key", "", "32-byte hex key for decryption (required for .enc files)")
+
+	// custom help message for restore
+	restoreCmd.Usage = CommandHelpMessage(restoreCmd)
+
 	// standard help message
 	flag.Usage = func() {
 		binName := filepath.Base(os.Args[0])
 		fmt.Printf("%s CLI — Utility that stores your config backups\n", binName)
 		fmt.Printf("\nUsage:\n  %s [command] [flags]\n", binName)
-		fmt.Println("\nCommands:\n  keygen       Generate a new 256-bit encryption key\n  backup       Backup an existing config file")
+		fmt.Println("\nCommands:\n  keygen       Generate a new 256-bit encryption key\n  backup       Backup an existing config file\n  restore      Restore a file from backup")
 		fmt.Printf("\nUse \"%s [command] -h\" for more information about a command.\n", binName)
 	}
 
@@ -59,8 +53,6 @@ func main() {
 	switch os.Args[1] {
 	case "keygen":
 		keyHandler := NewKeyHandler()
-		// Parse flags that come after the keygen word
-		keygenCmd.Parse(os.Args[2:])
 
 		// Generate 32 random bytes
 		key, err := keyHandler.GenerateKey()
@@ -70,38 +62,12 @@ func main() {
 		}
 
 		// KEYGEN LOGIC
-		if *toTerminal {
-			// Encoding key to HEX-string
-			encodedKey := keyHandler.EncodeKey(key)
-			fmt.Printf("Your Master Key (Save it securely!):\n%s\n", encodedKey)
-		} else {
-			if *keyDest == "" {
-				fmt.Println("Error: -out flag is required.")
-				keygenCmd.Usage()
-				return
-			}
-			const keyPermissions = 0600
-			const keyDir = "./backupKeys/"
 
-			if err := CreateDestDir(keyDir, keyPermissions); err != nil {
-				fmt.Println("Error creating key file:", err)
-				return
-			}
-			// Writing key to file
-			if err := os.WriteFile(keyDir+*keyDest+".key", key, keyPermissions); err != nil {
-				fmt.Println("Error writing key file:", err)
-				return
-			}
-			fmt.Printf("Key written to: %s\n", keyDir+*keyDest+".key")
-		}
+		// Encoding key to HEX-string
+		encodedKey := keyHandler.EncodeKey(key)
+		fmt.Printf("Your Master Key (Save it securely!):\n%s\n", encodedKey)
 
 	case "backup":
-		const backupDir = "./backups"
-		if err := os.MkdirAll(backupDir, 0755); err != nil {
-			fmt.Println("Error creating backup directory:", err)
-			return
-		}
-
 		// Parse flags that come after the backup word
 		backupCmd.Parse(os.Args[2:])
 
@@ -109,6 +75,15 @@ func main() {
 		if *inFile == "" || *outName == "" {
 			fmt.Println("Error: -in and -out flags are required.")
 			backupCmd.Usage()
+			return
+		}
+
+		// Extract directory and filename from -out path
+		backupDir := filepath.Dir(*outName)
+		backupName := filepath.Base(*outName)
+
+		if err := os.MkdirAll(backupDir, 0755); err != nil {
+			fmt.Println("Error creating backup directory:", err)
 			return
 		}
 
@@ -136,8 +111,52 @@ func main() {
 			engine.RegisterStorage(&SecureStorage{backupDir: backupDir, secretKey: key})
 		}
 
-		if err := engine.Backup(*inFile, *outName, storageType); err != nil {
+		if err := engine.Backup(*inFile, backupName, storageType); err != nil {
 			fmt.Println("Error during backup:", err)
+		}
+
+	case "restore":
+		restoreCmd.Parse(os.Args[2:])
+
+		if *restoreIn == "" || *restoreOut == "" {
+			fmt.Println("Error: -in and -out flags are required.")
+			restoreCmd.Usage()
+			return
+		}
+
+		// Determine storage type by file extension
+		storageType := "archive"
+		if filepath.Ext(*restoreIn) == ".enc" {
+			storageType = "secure"
+		}
+
+		// Extract directory and filename from -in path
+		backupDir := filepath.Dir(*restoreIn)
+		backupName := filepath.Base(*restoreIn)
+
+		fmt.Printf("Restoring from: %s -> %s using [%s] storage\n", *restoreIn, *restoreOut, storageType)
+
+		engine := NewSyncEngine()
+
+		engine.RegisterStorage(&ArchiveStorage{backupDir: backupDir})
+
+		if storageType == "secure" {
+			if *restoreKey == "" {
+				fmt.Println("Error: -key flag is required for encrypted backups.")
+				restoreCmd.Usage()
+				return
+			}
+			keyHandler := NewKeyHandler()
+			key, err := keyHandler.DecodeKey(*restoreKey)
+			if err != nil {
+				fmt.Println("Error decoding key:", err)
+				return
+			}
+			engine.RegisterStorage(&SecureStorage{backupDir: backupDir, secretKey: key})
+		}
+
+		if err := engine.Restore(backupName, *restoreOut, storageType); err != nil {
+			fmt.Println("Error during restore:", err)
 		}
 
 	default:
