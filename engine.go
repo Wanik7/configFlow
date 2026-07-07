@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
 )
 
@@ -36,4 +38,10 @@ func (se *SyncEngine) Backup(sourceFile, configName, storageName string) error {
 	}
 
 	return nil
+}
+
+func CloseSafe(c io.Closer) {
+	if err := c.Close(); err != nil {
+		log.Printf("could not close resource: %v", err)
+	}
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +13,13 @@ func CommandHelpMessage(f *flag.FlagSet) func() {
 		fmt.Println("\nFlags:")
 		f.PrintDefaults()
 	}
+}
+
+func CreateDestDir(backupDir string, permissions os.FileMode) error {
+	if err := os.MkdirAll(backupDir, permissions); err != nil {
+		return fmt.Errorf("could not create backup directory: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -52,38 +58,41 @@ func main() {
 	// Check which command the user entered first
 	switch os.Args[1] {
 	case "keygen":
+		keyHandler := NewKeyHandler()
 		// Parse flags that come after the keygen word
 		keygenCmd.Parse(os.Args[2:])
 
+		// Generate 32 random bytes
+		key, err := keyHandler.GenerateKey()
+		if err != nil {
+			fmt.Println("Error generating key:", err)
+			return
+		}
+
 		// KEYGEN LOGIC
 		if *toTerminal {
-			// Generate 32 random bytes
-			key, err := GenerateKey()
-			if err != nil {
-				fmt.Println("Error generating key:", err)
-				return
-			}
-			// Print key in terminal in beautiful HEX format (%x)
-			fmt.Printf("Your Master Key (Save it securely!):\n%x\n", key)
+			// Encoding key to HEX-string
+			encodedKey := keyHandler.EncodeKey(key)
+			fmt.Printf("Your Master Key (Save it securely!):\n%s\n", encodedKey)
 		} else {
 			if *keyDest == "" {
 				fmt.Println("Error: -out flag is required.")
 				keygenCmd.Usage()
 				return
 			}
-			// Create new 32 byte key
-			key, err := GenerateKey()
-			if err != nil {
-				fmt.Println("Error generating key:", err)
+			const keyPermissions = 0600
+			const keyDir = "./backupKeys/"
+
+			if err := CreateDestDir(keyDir, keyPermissions); err != nil {
+				fmt.Println("Error creating key file:", err)
 				return
 			}
-			// Write key to file
-			err = os.WriteFile(*keyDest, key, 0600)
-			if err != nil {
+			// Writing key to file
+			if err := os.WriteFile(keyDir+*keyDest+".key", key, keyPermissions); err != nil {
 				fmt.Println("Error writing key file:", err)
 				return
 			}
-			fmt.Printf("Key written to: %s\n", *keyDest)
+			fmt.Printf("Key written to: %s\n", keyDir+*keyDest+".key")
 		}
 
 	case "backup":
@@ -115,24 +124,17 @@ func main() {
 
 		engine.RegisterStorage(&ArchiveStorage{backupDir: backupDir})
 
-		var key [32]byte
 		if *keyStr != "" {
+			keyHandler := NewKeyHandler()
 			// Decoding HEX-string into bytes
-			decodedKey, err := hex.DecodeString(*keyStr)
+			key, err := keyHandler.DecodeKey(*keyStr)
 			if err != nil {
-				fmt.Println("Error: invalid hex key provided")
+				fmt.Println("Error decoding key:", err)
 				return
 			}
-			// Check for correct length
-			if len(decodedKey) != 32 {
-				fmt.Println("Error: key must be exactly 32 bytes (64 hex characters)")
-				return
-			}
-			// Copy correct bytes into our array
-			copy(key[:], decodedKey)
-		}
 
-		engine.RegisterStorage(&SecureStorage{backupDir: backupDir, secretKey: key})
+			engine.RegisterStorage(&SecureStorage{backupDir: backupDir, secretKey: key})
+		}
 
 		if err := engine.Backup(*inFile, *outName, storageType); err != nil {
 			fmt.Println("Error during backup:", err)
