@@ -1,0 +1,8 @@
+configflow
+configflow.exe
+
+.idea/
+.vscode/
+
+/backups
+*.enc
