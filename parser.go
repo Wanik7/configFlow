@@ -19,7 +19,7 @@ func ParseConfigFile(filePath string) (jobs []BackupJob, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer targetFile.Close()
+	defer CloseSafe(targetFile)
 
 	decoder := json.NewDecoder(targetFile)
 
@@ -59,6 +59,5 @@ func ResolvePath(path string) (string, error) {
 		return "", fmt.Errorf("could not convert to absolute path: %w", err)
 	}
 
-	// Clean up path
-	return filepath.Clean(absPath), nil
+	return absPath, nil
 }
