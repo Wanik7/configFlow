@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 func CommandHelpMessage(f *flag.FlagSet) func() {
@@ -21,6 +22,8 @@ func main() {
 	inFile := backupCmd.String("in", "", "Point to target file (REQUIRED)")
 	outName := backupCmd.String("out", "", "Point to destination file (REQUIRED)")
 	keyStr := backupCmd.String("key", "", "Use provided 32-byte hex key for encryption (enables secure mode)")
+
+	configFile := backupCmd.String("config", "", "Path to JSON config file with batch backup jobs")
 
 	// custom help message for backup
 	backupCmd.Usage = CommandHelpMessage(backupCmd)
@@ -61,8 +64,6 @@ func main() {
 			return
 		}
 
-		// KEYGEN LOGIC
-
 		// Encoding key to HEX-string
 		encodedKey := keyHandler.EncodeKey(key)
 		fmt.Printf("Your Master Key (Save it securely!):\n%s\n", encodedKey)
@@ -71,49 +72,74 @@ func main() {
 		// Parse flags that come after the backup word
 		backupCmd.Parse(os.Args[2:])
 
-		// Checking required flags
-		if *inFile == "" || *outName == "" {
-			fmt.Println("Error: -in and -out flags are required.")
+		// Validate: either (-in and -out) or (-config) must be provided, not both
+		hasInOut := *inFile != "" || *outName != ""
+		hasConfig := *configFile != ""
+
+		if !hasInOut && !hasConfig {
+			fmt.Println("Error: (-in and -out) or (-config) flags are required.")
 			backupCmd.Usage()
 			return
 		}
 
-		// Extract directory and filename from -out path
-		backupDir := filepath.Dir(*outName)
-		backupName := filepath.Base(*outName)
-
-		if err := os.MkdirAll(backupDir, 0755); err != nil {
-			fmt.Println("Error creating backup directory:", err)
+		if hasInOut && hasConfig {
+			fmt.Println("Error: (-in and -out) and (-config) flags cannot be used together.")
+			backupCmd.Usage()
 			return
 		}
 
-		// Determine backup strategy
-		storageType := "archive"
-		if *keyStr != "" {
-			storageType = "secure"
+		// Build the list of backup jobs
+		var jobs []BackupJob
+
+		if hasConfig {
+			var err error
+			jobs, err = ParseConfigFile(*configFile)
+			if err != nil {
+				fmt.Println("Error while parsing backup jobs config file:", err)
+				return
+			}
+		} else {
+			if *inFile == "" || *outName == "" {
+				fmt.Println("Error: both -in and -out flags are required.")
+				backupCmd.Usage()
+				return
+			}
+
+			storageType := "archive"
+			if *keyStr != "" {
+				storageType = "secure"
+			}
+
+			jobs = []BackupJob{
+				{
+					SourceData:  *inFile,
+					BackupDest:  *outName,
+					StorageType: storageType,
+				},
+			}
 		}
 
-		fmt.Printf("Starting backup for: %s -> saved as: %s using [%s] storage\n", *inFile, *outName, storageType)
-
+		// Create engine and register storages
 		engine := NewSyncEngine()
 
-		engine.RegisterStorage(&ArchiveStorage{backupDir: backupDir})
+		// Always register ArchiveStorage as the default
+		engine.RegisterStorage(&ArchiveStorage{backupDir: "."})
 
+		// Additionally register SecureStorage if a key is provided
 		if *keyStr != "" {
 			keyHandler := NewKeyHandler()
-			// Decoding HEX-string into bytes
 			key, err := keyHandler.DecodeKey(*keyStr)
 			if err != nil {
 				fmt.Println("Error decoding key:", err)
 				return
 			}
-
-			engine.RegisterStorage(&SecureStorage{backupDir: backupDir, secretKey: key})
+			engine.RegisterStorage(&SecureStorage{backupDir: ".", secretKey: key})
 		}
 
-		if err := engine.Backup(*inFile, backupName, storageType); err != nil {
-			fmt.Println("Error during backup:", err)
-		}
+		// Calculate optimal worker count: no more than CPU cores or job count
+		numWorkers := min(len(jobs), runtime.NumCPU())
+
+		engine.ParallelBackup(jobs, numWorkers)
 
 	case "restore":
 		restoreCmd.Parse(os.Args[2:])

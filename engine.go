@@ -20,52 +20,6 @@ func (se *SyncEngine) RegisterStorage(s Storage) {
 	se.storages[s.GetName()] = s
 }
 
-func (se *SyncEngine) Backup(sourceFile, configName, storageName string) error {
-	storage, ok := se.storages[storageName]
-	if !ok {
-		return fmt.Errorf("no such storage: %s", storageName)
-	}
-
-	targetFile, err := os.Open(sourceFile)
-	if err != nil {
-		return fmt.Errorf("could not open target file: %w", err)
-	}
-
-	defer CloseSafe(targetFile)
-
-	err = storage.Store(configName, targetFile)
-	if err != nil {
-		return fmt.Errorf("could not backup target file: %w", err)
-	}
-
-	return nil
-}
-
-func (se *SyncEngine) Restore(backupFile, destFile, storageName string) error {
-	storage, ok := se.storages[storageName]
-	if !ok {
-		return fmt.Errorf("no such storage: %s", storageName)
-	}
-
-	outFile, err := os.Create(destFile)
-	if err != nil {
-		return fmt.Errorf("could not create destination file: %w", err)
-	}
-	defer CloseSafe(outFile)
-
-	if err := storage.Retrieve(backupFile, outFile); err != nil {
-		return fmt.Errorf("could not restore backup: %w", err)
-	}
-
-	return nil
-}
-
-type BackupJob struct {
-	SourceData  string
-	BackupDest  string
-	StorageType string // archive or secure
-}
-
 func (se *SyncEngine) worker(id uint, jobs <-chan BackupJob, results chan<- string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -123,6 +77,25 @@ func (se *SyncEngine) ParallelBackup(jobList []BackupJob, maxWorkers int) {
 	}
 
 	fmt.Println("\n--- Done ---")
+}
+
+func (se *SyncEngine) Restore(backupFile, destFile, storageName string) error {
+	storage, ok := se.storages[storageName]
+	if !ok {
+		return fmt.Errorf("no such storage: %s", storageName)
+	}
+
+	outFile, err := os.Create(destFile)
+	if err != nil {
+		return fmt.Errorf("could not create destination file: %w", err)
+	}
+	defer CloseSafe(outFile)
+
+	if err := storage.Retrieve(backupFile, outFile); err != nil {
+		return fmt.Errorf("could not restore backup: %w", err)
+	}
+
+	return nil
 }
 
 func CloseSafe(c io.Closer) {
