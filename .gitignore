@@ -6,3 +6,6 @@ configflow.exe
 
 /backups
 *.enc
+
+test*
+*.json

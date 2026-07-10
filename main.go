@@ -42,7 +42,7 @@ func main() {
 		binName := filepath.Base(os.Args[0])
 		fmt.Printf("%s CLI — Utility that stores your config backups\n", binName)
 		fmt.Printf("\nUsage:\n  %s [command] [flags]\n", binName)
-		fmt.Println("\nCommands:\n  keygen       Generate a new 256-bit encryption key\n  backup       Backup an existing config file\n  restore      Restore a file from backup")
+		fmt.Println("\nCommands:\n  init         Create a JSON config file interactively\n  keygen       Generate a new 256-bit encryption key\n  backup       Backup an existing config file\n  restore      Restore a file from backup")
 		fmt.Printf("\nUse \"%s [command] -h\" for more information about a command.\n", binName)
 	}
 
@@ -54,6 +54,9 @@ func main() {
 
 	// Check which command the user entered first
 	switch os.Args[1] {
+	case "init":
+		RunConfigMaker()
+
 	case "keygen":
 		keyHandler := NewKeyHandler()
 
